@@ -279,7 +279,8 @@ namespace Clipper2Lib {
 
     inline void PolyPathToPathsD(const PolyPathD& polypath, PathsD& paths)
     {
-      paths.push_back(polypath.Polygon());
+   	  if(!polypath.Polygon().empty())
+        paths.push_back(polypath.Polygon());
       for (const auto& child : polypath)
         PolyPathToPathsD(*child, paths);
     }
