@@ -8,6 +8,7 @@
 *******************************************************************************/
 
 #include <cmath>
+#include <assert.h>
 #include "clipper2/clipper.h"
 #include "clipper2/clipper.offset.h"
 
@@ -234,6 +235,15 @@ void ClipperOffset::DoSquare(const Path64& path, size_t j, size_t k)
 	}
 }
 
+void ClipperOffset::_AddConnection(const Path64& p_in, int v_in, int v_path_out)
+{
+	assert(keep_vertices_connections_);
+	assert(path_ids_.find(&p_in) != path_ids_.end());
+	Vert src{ path_ids_[&p_in], v_in };
+	Vert dst{ (int)solution->size(), v_path_out == -1 ? (int)path_out.size() - 1 : v_path_out };
+	vertices_connections_[src].push_back(dst);
+}
+
 void ClipperOffset::DoMiter(const Path64& path, size_t j, size_t k, double cos_a)
 {
 	double q = group_delta_ / (cos_a + 1);
@@ -296,7 +306,8 @@ void ClipperOffset::OffsetPoint(Group& group, const Path64& path, size_t j, size
 	// sin(A) < 0: right turning
 	// cos(A) < 0: change in angle is more than 90 degree
 
-	if (path[j] == path[k]) return;
+	if (path[j] == path[k])
+		return;
 
 	double sin_a = CrossProduct(norms[j], norms[k]);
 	double cos_a = DotProduct(norms[j], norms[k]);
@@ -313,6 +324,8 @@ void ClipperOffset::OffsetPoint(Group& group, const Path64& path, size_t j, size
 		return;
 	}
 
+	auto path_out_size_before = path_out.size();
+
 	if (cos_a > -0.999 && (sin_a * group_delta_ < 0)) // test for concavity first (#593)
 	{
 		// is concave (so insert 3 points that will create a negative region)
@@ -325,7 +338,10 @@ void ClipperOffset::OffsetPoint(Group& group, const Path64& path, size_t j, size
 		// this extra point is the only simple way to ensure that path reversals
 		// (ie over-shrunk paths) are fully cleaned out with the trailing union op.
 		// However it's probably safe to skip this whenever an angle is almost flat.
-		if (cos_a < 0.99) path_out.push_back(path[j]); // (#405)
+		if (cos_a < 0.99)
+		{
+			path_out.push_back(path[j]); // (#405)
+		}
 
 #ifdef USINGZ
 		path_out.push_back(Point64(GetPerpendic(path[j], norms[j], group_delta_), path[j].z));
@@ -350,6 +366,14 @@ void ClipperOffset::OffsetPoint(Group& group, const Path64& path, size_t j, size
 		DoBevel(path, j, k);
 	else
 		DoSquare(path, j, k);
+
+	if (keep_vertices_connections_)
+	{
+		for (auto ipo = path_out_size_before; ipo < path_out.size(); ipo++)
+		{
+			_AddConnection(path, j, ipo);
+		}
+	}
 }
 
 void ClipperOffset::OffsetPolygon(Group& group, const Path64& path)
@@ -557,6 +581,20 @@ bool ClipperOffset::CheckReverseOrientation()
 
 void ClipperOffset::ExecuteInternal(double delta)
 {
+	// Save path indices
+	if (keep_vertices_connections_)
+	{
+		int iglobalpath = 0;
+		for (int igroup = 0; igroup < (int)groups_.size(); igroup++)
+		{
+			auto& paths = groups_[igroup].paths_in;
+			for (int ipath = 0; ipath < (int)paths.size(); ipath++)
+			{
+				path_ids_[&paths[ipath]] = iglobalpath;
+				iglobalpath++;
+			}
+		}
+	}
 	error_code_ = 0;
 	if (groups_.size() == 0) return;
 	solution->reserve(CalcSolutionCapacity());
@@ -585,6 +623,31 @@ void ClipperOffset::ExecuteInternal(double delta)
 			solution->clear();
 		}
 	}
+
+#ifndef NDEBUG
+	// check if all vertices had their connections
+	if (keep_vertices_connections_)
+	{
+		for (int ipath = 0; ipath < (int)solution->size(); ipath++)
+		{
+			auto& sol_path = solution[ipath];
+			for (int iv = 0; iv < (int)sol_path.size(); iv++)
+			{
+				Vert to_find{ ipath, iv };
+				bool found = false;
+				for (auto& conn : vertices_connections_)
+				{
+					if(std::find(conn.second.begin(), conn.second.end(), to_find) != conn.second.end())
+						found = true;
+				}
+				if (!found)
+				{
+					assert(false);
+				}
+			}
+		}
+	}
+#endif
 
 	if (!solution->size()) return;
 

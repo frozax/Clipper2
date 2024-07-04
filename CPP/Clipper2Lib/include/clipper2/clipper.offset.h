@@ -10,6 +10,8 @@
 #ifndef CLIPPER_OFFSET_H_
 #define CLIPPER_OFFSET_H_
 
+#include <map>
+
 #include "clipper.core.h"
 #include "clipper.engine.h"
 
@@ -117,6 +119,32 @@ public:
 	void SetZCallback(ZCallback64 cb) { zCallback64_ = cb; }
 #endif
 	void SetDeltaCallback(DeltaCallback64 cb) { deltaCallback64_ = cb; }
+
+	// FROZAX (BEGIN)
+	struct Vert
+	{
+		int p = -1;	// path
+		int v = -1;	// vert
+		bool operator<(const Vert& other) const
+		{
+			if (p == other.p)
+				return v < other.v;
+			else
+				return p < other.p;
+		}
+		bool operator==(const Vert& other) const
+		{
+			return p == other.p && v == other.v;
+		}
+	};
+	using Verts = std::vector<Vert>;
+	using VerticesConnections = std::map<Vert, Verts>;
+	VerticesConnections vertices_connections_;
+	std::map<const Path64*, int> path_ids_;
+	bool keep_vertices_connections_ = false;
+
+	void _AddConnection(const Path64& p_in, int v_in, int v_path_out = -1);
+	// FROZAX (END)
 
 };
 
